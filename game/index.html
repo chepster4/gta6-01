@@ -1,106 +1,19 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<title>Palmira Bay — Streets of the Sun</title>
+<title>PALMIRA BAY — Streets of the Sun</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1026;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  .topleft { position: absolute; top: 12px; left: 14px; font-weight: 700; font-size: 20px;
-    text-shadow: 0 2px 4px rgba(0,0,0,.7); line-height: 1.35; }
-  #money { color: #7aff8a; }
-  #coins { color: #ffd040; margin-left: 10px; }
-  #hp-row { display: flex; align-items: center; gap: 8px; }
-  #hp-bar { width: 150px; height: 12px; background: rgba(0,0,0,.55); border: 1px solid #fff3; }
-  #hp-fill { height: 100%; width: 100%; background: #58d858; }
-  #job { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-    background: rgba(10,16,38,.72); border-left: 4px solid #ffd040; padding: 8px 16px;
-    text-align: center; border-radius: 4px; max-width: 46vw; }
-  #job-title { font-weight: 800; font-size: 17px; letter-spacing: .5px; }
-  #job-brief { font-size: 13px; color: #ffd98a; margin-top: 2px; }
-  .stars { position: absolute; top: 12px; right: 16px; font-size: 26px; letter-spacing: 3px;
-    color: #888; text-shadow: 0 2px 4px rgba(0,0,0,.8); }
-  .stars.hot { color: #ffd040; }
-  #minimap { position: absolute; left: 14px; bottom: 14px; width: 200px; height: 200px;
-    border: 3px solid rgba(255,255,255,.75); border-radius: 50%; background: #16202e;
-    box-shadow: 0 4px 18px rgba(0,0,0,.6); }
-  #controls { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-    background: rgba(0,0,0,.55); padding: 5px 12px; border-radius: 20px; font-size: 12.5px; white-space: nowrap; }
-  #speedo { position: absolute; right: 16px; bottom: 14px; text-align: right; text-shadow: 0 2px 4px rgba(0,0,0,.8); }
-  #vehicle { font-size: 15px; font-weight: 700; }
-  #speed { font-size: 42px; font-weight: 800; line-height: 1; }
-  #speed small { font-size: 15px; font-weight: 600; }
-  #weapon { font-size: 14px; font-weight: 700; margin-top: 4px; }
-  #toast { position: absolute; top: 88px; left: 50%; transform: translateX(-50%);
-    background: rgba(0,0,0,.7); padding: 8px 18px; border-radius: 20px; font-size: 15px;
-    font-weight: 600; opacity: 0; transition: opacity .3s; }
-  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; text-align: center; background: rgba(6,10,26,.72); z-index: 10; }
-  .screen h1 { font-size: 52px; margin: 0; letter-spacing: 2px; color: #ffd040;
-    text-shadow: 0 4px 0 #c8321e, 0 8px 24px rgba(0,0,0,.6); }
-  .screen h2 { font-size: 20px; font-weight: 600; color: #bfe3f2; margin: 6px 0 18px; }
-  .screen p { max-width: 560px; line-height: 1.6; color: #eef1f5; }
-  .screen .keys { font-size: 14px; color: #ffd98a; }
-  .screen button { pointer-events: auto; cursor: pointer; margin-top: 22px; padding: 12px 34px;
-    font-size: 18px; font-weight: 800; border: none; border-radius: 8px; color: #141020;
-    background: #ffd040; box-shadow: 0 4px 0 #b88a00; }
-  #shop { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 11;
-    display: none; background: #141020; border: 2px solid #ff5a7a; border-radius: 10px;
-    padding: 20px 26px; width: 340px; pointer-events: auto; box-shadow: 0 10px 40px rgba(0,0,0,.7); }
-  #shop h2 { margin: 0 0 4px; color: #ff5a7a; letter-spacing: 1px; }
-  #shop p { margin: 4px 0 14px; color: #ffd98a; }
-  #shop button { display: block; width: 100%; margin: 8px 0; padding: 11px; font-size: 15px;
-    font-weight: 700; cursor: pointer; border: none; border-radius: 6px; background: #ffd040; color: #141020; }
-  #shop button.ghost { background: #333; color: #fff; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0c0c14; }
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; }
+  button { cursor: pointer; font-family: Arial, sans-serif; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Palmira Bay: an open-world crime game. Steal cars, outrun the police and finish five jobs."></canvas>
-<p id="status" role="status" aria-live="polite"></p>
-<div id="hud">
-  <div class="topleft">
-    <div><span id="money">$120</span><span id="coins">🪙 0/12</span></div>
-    <div id="hp-row">HP <span id="hp-bar"><span id="hp-fill" style="display:block"></span></span><span id="hp-text">100</span></div>
-    <div><span id="clock">09:00</span>&nbsp;&nbsp;<span id="radio">RADIO SOL 98.5</span></div>
-  </div>
-  <div id="job"><div id="job-title">JOB 1 — WHEELS FOR ROSA</div><div id="job-brief">Steal a car — walk up to any parked car and press E</div></div>
-  <div id="stars" class="stars">☆☆☆☆☆</div>
-  <canvas id="minimap" width="200" height="200"></canvas>
-  <div id="controls">WASD drive / walk &nbsp;·&nbsp; E steal car &nbsp;·&nbsp; SPACE handbrake &nbsp;·&nbsp; CLICK / F fight &nbsp;·&nbsp; R radio &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute</div>
-  <div id="speedo"><div id="vehicle">ON FOOT</div><div id="speed">0 <small>km/h</small></div><div id="weapon">FISTS — finish Job 1 for a pistol</div></div>
-  <div id="toast"></div>
-</div>
-<div id="shop">
-  <h2>SOLMAR ARMS</h2>
-  <p>Cash: <span id="shop-money">$120</span> — the finest iron in Palmira Bay.</p>
-  <button id="buy-ammo">Ammo +30 — $50</button>
-  <button id="buy-medkit">Medkit (full heal) — $75</button>
-  <button id="close-shop" class="ghost">Close (E)</button>
-</div>
-<div id="start-screen" class="screen" style="display:flex">
-  <h1>PALMIRA BAY</h1>
-  <h2>Streets of the Sun — an open-world crime game</h2>
-  <p>You are Rio, a wheelman fresh out of the east docks. Rosa needs a car, the
-  Vipers want their briefcase back, and the Palmira PD wants you. Steal cars,
-  outrun the law, finish all five jobs and become the King of Palmira.</p>
-  <p class="keys">WASD drive / walk · E steal car · SPACE handbrake · CLICK / F fight · R radio · P pause · M mute</p>
-  <p id="start-sub">Press Enter or click to play.</p>
-  <button id="start-btn" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{code:'Enter'}))">PLAY</button>
-</div>
-<div id="pause-screen" class="screen" style="display:none">
-  <h1>PAUSED</h1>
-  <p>Press P or Enter to keep driving.</p>
-</div>
-<div id="over-screen" class="screen" style="display:none">
-  <h1>BUSTED</h1>
-  <p id="over-stats"></p>
-  <p>Press Enter to get back on the streets.</p>
-</div>
-<script type="module" src="./src/main.js"></script>
+<div id="game"></div>
+<script src="vendor/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
 </body>
 </html>
