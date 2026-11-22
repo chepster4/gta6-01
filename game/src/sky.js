@@ -1,154 +1,111 @@
-// The sky: a gradient dome (never a flat colour), a sun disc by day, a moon
-// disc by night, slow-drifting clouds and stars that only show after dark.
-// All sky materials ignore fog so the horizon never turns to grey mush.
-import * as THREE from '../vendor/three.min.js';
+// Sky: gradient dome + sun/moon discs + drifting clouds + night stars.
+// Three times of day (day / dusk / night) that recolor fog, lights and
+// the dome together.
+const THREE = window.THREE;
 
-// Day runs 06:00–17:00, dusk 17:00–19:30, night 19:30–06:00.
-function modeFor(minutes) {
-  if (minutes >= 360 && minutes < 1020) return 'day';
-  if (minutes >= 1020 && minutes < 1170) return 'dusk';
-  return 'night';
-}
+const MODES = {
+  day:  { top: 0x3d7ac8, mid: 0x8ec8ee, bot: 0xcfe8f5, sun: 0xfff2c0, fog: 0x9fc6e8, hemi: 0.9, sunI: 1.15, amb: 0.55 },
+  dusk: { top: 0x2a2350, mid: 0xd86a4a, bot: 0xf5a55c, sun: 0xff8833, fog: 0xc97a5a, hemi: 0.6, sunI: 0.7,  amb: 0.4 },
+  night:{ top: 0x050914, mid: 0x0e1a33, bot: 0x1c2a44, sun: 0xdde6ff, fog: 0x0a1226, hemi: 0.28, sunI: 0.12, amb: 0.22 },
+};
 
-function lerpColor(a, b, t, out) {
-  out.copy(a).lerp(b, t);
-  return out;
-}
-
-export function createSky(scene) {
-  // Gradient dome: a big sphere whose vertex colours run horizon -> zenith.
-  const domeGeo = new THREE.SphereGeometry(900, 24, 12);
-  const colors = new Float32Array(domeGeo.attributes.position.count * 3);
-  const top = new THREE.Color(0x3a7bd5);
-  const horizon = new THREE.Color(0xbfe3f2);
-  const pos = domeGeo.attributes.position;
-  for (let i = 0; i < pos.count; i += 1) {
-    const y = pos.getY(i) / 900;
-    const t = Math.max(0, Math.min(1, y * 1.4 + 0.15));
-    const c = new THREE.Color().copy(horizon).lerp(top, t);
-    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
-  }
-  domeGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const domeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false });
-  const dome = new THREE.Mesh(domeGeo, domeMat);
-  scene.add(dome);
-
-  const sunMat = new THREE.MeshBasicMaterial({ color: 0xffe9a8, fog: false });
-  const sun = new THREE.Mesh(new THREE.CircleGeometry(34, 24), sunMat);
-  sun.position.set(420, 320, -700);
-  sun.lookAt(0, 0, 0);
-  scene.add(sun);
-
-  const moonMat = new THREE.MeshBasicMaterial({ color: 0xdfe8ff, fog: false });
-  const moon = new THREE.Mesh(new THREE.CircleGeometry(22, 24), moonMat);
-  moon.position.set(-380, 380, -680);
-  moon.lookAt(0, 0, 0);
-  scene.add(moon);
-
-  // Stars: points on the upper dome, invisible by day.
-  const starCount = 420;
-  const starPos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i += 1) {
-    const a = Math.random() * Math.PI * 2;
-    const e = 0.15 + Math.random() * 1.2;
-    const r = 880;
-    starPos[i * 3] = Math.cos(a) * Math.cos(e) * r;
-    starPos[i * 3 + 1] = Math.sin(e) * r;
-    starPos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
-  }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.4, fog: false, transparent: true, opacity: 0 });
-  const stars = new THREE.Points(starGeo, starMat);
-  scene.add(stars);
-
-  // Clouds: flat white puffs drifting slowly across the dome.
-  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, fog: false });
-  const clouds = [];
-  for (let i = 0; i < 14; i += 1) {
-    const group = new THREE.Group();
-    const puffs = 3 + (i % 3);
-    for (let j = 0; j < puffs; j += 1) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(14 + (j % 3) * 7, 8, 6), cloudMat);
-      puff.position.set(j * 16 - 20, (j % 2) * 4, (j % 3) * 8 - 8);
-      puff.scale.y = 0.45;
-      group.add(puff);
-    }
-    group.position.set(-700 + (i * 137) % 1400, 190 + (i % 5) * 26, -600 + (i * 211) % 1100);
-    scene.add(group);
-    clouds.push(group);
-  }
-
-  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x3a2f26, 0.9);
-  scene.add(hemi);
-  const sunLight = new THREE.DirectionalLight(0xfff2cc, 1.6);
-  sunLight.position.set(180, 260, 120);
-  scene.add(sunLight);
-  const nightFill = new THREE.PointLight(0xffc880, 0, 90, 1.6);
-  scene.add(nightFill);
-
-  const dayTop = new THREE.Color(0x3a7bd5);
-  const dayHorizon = new THREE.Color(0xbfe3f2);
-  const duskTop = new THREE.Color(0x5a3a6e);
-  const duskHorizon = new THREE.Color(0xff9a5c);
-  const nightTop = new THREE.Color(0x050914);
-  const nightHorizon = new THREE.Color(0x1a2440);
-  const tmp = new THREE.Color();
-
-  function paintDome(topC, horizonC) {
-    for (let i = 0; i < pos.count; i += 1) {
+export class Sky {
+  constructor(scene) {
+    this.scene = scene;
+    this.mode = 'dusk';
+    this.group = new THREE.Group();
+    // Gradient dome: big sphere, BackSide, vertex colors blended by height.
+    const geo = new THREE.SphereGeometry(900, 24, 16);
+    const colors = [];
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i) / 900;
-      const t = Math.max(0, Math.min(1, y * 1.4 + 0.15));
-      lerpColor(horizonC, topC, t, tmp);
-      colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+      colors.push(1, 1, 1);
     }
-    domeGeo.attributes.color.needsUpdate = true;
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    this.domeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false });
+    this.dome = new THREE.Mesh(geo, this.domeMat);
+    this.group.add(this.dome);
+    // Sun / moon disc.
+    this.sun = new THREE.Mesh(
+      new THREE.CircleGeometry(34, 32),
+      new THREE.MeshBasicMaterial({ color: 0xff8833, fog: false, transparent: true, opacity: 0.95 })
+    );
+    this.sun.position.set(-420, 300, -620);
+    this.sun.lookAt(0, 0, 0);
+    this.group.add(this.sun);
+    this.moon = new THREE.Mesh(
+      new THREE.CircleGeometry(20, 32),
+      new THREE.MeshBasicMaterial({ color: 0xdde6ff, fog: false, transparent: true, opacity: 0.9 })
+    );
+    this.moon.position.set(380, 380, -560);
+    this.moon.lookAt(0, 0, 0);
+    this.moon.visible = false;
+    this.group.add(this.moon);
+    // Stars (night only).
+    const starGeo = new THREE.BufferGeometry();
+    const sp = [];
+    for (let i = 0; i < 420; i++) {
+      const a = Math.random() * Math.PI * 2, e = Math.random() * Math.PI * 0.45 + 0.08;
+      const r = 880;
+      sp.push(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, Math.sin(a) * Math.cos(e) * r);
+    }
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, fog: false, transparent: true, opacity: 0 }));
+    this.group.add(this.stars);
+    // Drifting clouds: flattened white blobs.
+    this.clouds = [];
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, opacity: 0.85 });
+    for (let i = 0; i < 14; i++) {
+      const c = new THREE.Group();
+      const n = 3 + Math.floor(Math.random() * 3);
+      for (let j = 0; j < n; j++) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(14 + Math.random() * 16, 8, 6), cloudMat);
+        s.position.set(j * 18 - n * 9, Math.random() * 4, Math.random() * 10 - 5);
+        s.scale.y = 0.35;
+        c.add(s);
+      }
+      c.position.set(Math.random() * 1200 - 600, 180 + Math.random() * 90, Math.random() * 1200 - 600);
+      c.userData.speed = 1.5 + Math.random() * 2;
+      this.clouds.push(c);
+      this.group.add(c);
+    }
+    scene.add(this.group);
+    this.setMode('dusk');
   }
-
-  let lastMode = '';
-  return {
-    mode: 'day',
-    /** Set the sky for a clock time in minutes since midnight. */
-    setTime(minutes) {
-      const mode = modeFor(minutes);
-      this.mode = mode;
-      if (mode === lastMode) return;
-      lastMode = mode;
-      if (mode === 'day') {
-        paintDome(dayTop, dayHorizon);
-        sun.visible = true; moon.visible = false;
-        starMat.opacity = 0;
-        hemi.intensity = 0.9; sunLight.intensity = 1.6; sunLight.color.set(0xfff2cc);
-        scene.fog = new THREE.Fog(0xa8d0e8, 320, 850);
-        cloudMat.opacity = 0.85;
-      } else if (mode === 'dusk') {
-        paintDome(duskTop, duskHorizon);
-        sun.visible = true; moon.visible = false;
-        starMat.opacity = 0.25;
-        hemi.intensity = 0.55; sunLight.intensity = 0.9; sunLight.color.set(0xffb070);
-        scene.fog = new THREE.Fog(0xc07850, 300, 800);
-        cloudMat.opacity = 0.7;
-      } else {
-        paintDome(nightTop, nightHorizon);
-        sun.visible = false; moon.visible = true;
-        starMat.opacity = 0.9;
-        hemi.intensity = 0.28; sunLight.intensity = 0.35; sunLight.color.set(0x8fa8ff);
-        scene.fog = new THREE.Fog(0x0a1026, 260, 780);
-        cloudMat.opacity = 0.35;
-      }
-    },
-    /** Drift the clouds and keep the night fill light over the player. */
-    update(dt, playerX, playerZ) {
-      for (const cloud of clouds) {
-        cloud.position.x += dt * 2.2;
-        if (cloud.position.x > 760) cloud.position.x = -760;
-      }
-      if (this.mode === 'night' || this.mode === 'dusk') {
-        nightFill.intensity = this.mode === 'night' ? 60 : 25;
-        nightFill.position.set(playerX, 26, playerZ + 8);
-      } else {
-        nightFill.intensity = 0;
-      }
-    },
-  };
+  _lerpColor(hexA, hexB, t, out) {
+    const a = new THREE.Color(hexA), b = new THREE.Color(hexB);
+    out.copy(a).lerp(b, t);
+    return out;
+  }
+  setMode(mode) {
+    this.mode = mode;
+    const m = MODES[mode];
+    const pos = this.dome.geometry.attributes.position;
+    const col = this.dome.geometry.attributes.color;
+    const top = new THREE.Color(m.top), mid = new THREE.Color(m.mid), bot = new THREE.Color(m.bot);
+    const tmp = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i) / 900; // -1..1
+      if (y > 0.12) tmp.copy(mid).lerp(top, Math.min(1, (y - 0.12) / 0.6));
+      else if (y < -0.05) tmp.copy(mid).lerp(bot, Math.min(1, (-0.05 - y) / 0.5));
+      else tmp.copy(mid);
+      col.setXYZ(i, tmp.r, tmp.g, tmp.b);
+    }
+    col.needsUpdate = true;
+    this.sun.material.color.setHex(m.sun);
+    this.sun.visible = mode !== 'night';
+    this.moon.visible = mode === 'night';
+    this.stars.material.opacity = mode === 'night' ? 0.95 : 0;
+    this.scene.fog = new THREE.Fog(m.fog, 220, 900);
+    this.scene.background = new THREE.Color(m.fog);
+    return m;
+  }
+  update(dt) {
+    for (const c of this.clouds) {
+      c.position.x += c.userData.speed * dt;
+      if (c.position.x > 650) c.position.x = -650;
+    }
+    this.group.position.x = 0; // dome follows nothing; city is centered at origin
+  }
 }

@@ -1,97 +1,164 @@
-// Cars: a boxy mesh built from a body, a cabin, headlights and tail lights,
-// plus arcade driving physics (accelerate, steer, brake, handbrake drift)
-// and a simple enter/exit model shared by street cars, traffic and police.
-import * as THREE from '../vendor/three.min.js';
-import { CAR } from './config.js';
+// Vehicles: 12 stealable cars, driving, upgrades, damage and burning
+// wrecks. Cars are simple box-built sedans/sports cars with spinning
+// wheels; driving is arcade (accelerate / brake / steer / nitro).
+const THREE = window.THREE;
+import { CFG } from './config.js';
 
-const WHEEL = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10);
+const CAR_COLORS = [0xd83a2a, 0x2a6ad8, 0xe0b52e, 0x2ad86a, 0x8a2ad8, 0xd8d8d8, 0x222228, 0xd86a2a, 0x2ad8c2, 0xa82a5a, 0x4a7a3a, 0xc2c22a];
 
-export function createCarMesh(color, opts = {}) {
-  const group = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.75, 4.4), bodyMat);
-  body.position.y = 0.65;
-  group.add(body);
-  const cabin = new THREE.Mesh(
-    new THREE.BoxGeometry(1.8, 0.65, 2.2),
-    new THREE.MeshLambertMaterial({ color: opts.cabinColor ?? 0x18202a }),
-  );
-  cabin.position.set(0, 1.3, opts.cabinZ ?? -0.2);
-  group.add(cabin);
-  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
-  for (const [wx, wz] of [[-1.0, 1.45], [1.0, 1.45], [-1.0, -1.45], [1.0, -1.45]]) {
-    const wheel = new THREE.Mesh(WHEEL, wheelMat);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(wx, 0.42, wz);
-    group.add(wheel);
+export class VehicleSys {
+  constructor(scene, G) {
+    this.scene = scene; this.G = G;
+    this.cars = [];
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    this._spawnCars();
   }
-  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
-  for (const hx of [-0.7, 0.7]) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.22, 0.1), headMat);
-    head.position.set(hx, 0.72, 2.22);
-    group.add(head);
+  _buildCarMesh(color, sport) {
+    const g = new THREE.Group();
+    const bodyMat = new THREE.MeshLambertMaterial({ color });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.75, sport ? 4.6 : 4.2), bodyMat);
+    body.position.y = 0.65; g.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 2.1), new THREE.MeshLambertMaterial({ color: 0x1a2530 }));
+    cabin.position.set(0, 1.35, sport ? 0.1 : -0.15); g.add(cabin);
+    const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 12);
+    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    const wheels = [];
+    for (const [wx, wz] of [[-1.0, 1.45], [1.0, 1.45], [-1.0, -1.45], [1.0, -1.45]]) {
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(wx, 0.42, wz);
+      g.add(w); wheels.push(w);
+    }
+    // Headlights.
+    const hl = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+    for (const sx of [-0.65, 0.65]) {
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.22, 0.1), hl);
+      h.position.set(sx, 0.7, sport ? -2.32 : -2.12);
+      g.add(h);
+    }
+    return { group: g, wheels };
   }
-  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
-  for (const hx of [-0.7, 0.7]) {
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.22, 0.1), tailMat);
-    tail.position.set(hx, 0.72, -2.22);
-    group.add(tail);
+  _spawnCars() {
+    const rng = this.G.rng;
+    const spots = [
+      [30, -14], [-30, 14], [86, -14], [-86, 42], [142, 14], [-142, -14],
+      [30, 98], [-30, -98], [198, -14], [-198, 70], [86, 154], [-86, -154],
+    ];
+    spots.forEach(([x, z], i) => {
+      const sport = i % 3 === 0;
+      const { group, wheels } = this._buildCarMesh(CAR_COLORS[i], sport);
+      group.position.set(x, 0, z);
+      group.rotation.y = rng.float(0, Math.PI * 2);
+      this.group.add(group);
+      this.cars.push({
+        id: i, mesh: group, wheels, x, z, angle: group.rotation.y,
+        speed: 0, hp: 100, maxHp: 100, sport, stolen: false, wreck: false,
+        upgrades: { engine: 0, armor: 0, nitro: 0 }, burning: 0, fire: null,
+      });
+    });
   }
-  if (opts.police) {
-    const barMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 0.5), barMat);
-    bar.position.set(0, 1.72, -0.2);
-    group.add(bar);
-    group.userData.lightbar = bar;
-    group.userData.lightbarMat = barMat;
+  nearestCar(px, pz, maxD = 4) {
+    let best = null, bd = maxD * maxD;
+    for (const c of this.cars) {
+      if (c.wreck) continue;
+      const dx = c.x - px, dz = c.z - pz;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
   }
-  if (opts.taxi) {
-    const sign = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 0.3, 0.5),
-      new THREE.MeshBasicMaterial({ color: 0xffe040 }),
-    );
-    sign.position.set(0, 1.75, -0.2);
-    group.add(sign);
+  enter(car, player) {
+    car.stolen = true;
+    player.car = car;
+    player.onFoot = false;
+    this.G.audio.engine(true, 0);
+    this.G.hud.flash('Car stolen — drive with W A S D, Shift = nitro (if fitted)');
+    if (player.wanted < 1) player.wanted = 1;
   }
-  group.userData.bodyMat = bodyMat;
-  return group;
-}
-
-/** Arcade car state: position, heading, speed; stepped by drive(). */
-export function createCarState(x, z, heading) {
-  return { x, z, heading, speed: 0 };
-}
-
-/**
- * Advance one car one fixed step. `throttle` -1..1, `steer` -1..1.
- * Returns nothing; mutates the state. `collide` resolves the new position.
- */
-export function driveCar(car, throttle, steer, handbrake, dt, collide) {
-  const grip = handbrake ? CAR.grip * 0.35 : CAR.grip;
-  if (throttle > 0) car.speed += CAR.accel * throttle * dt;
-  else if (throttle < 0) {
-    car.speed += (car.speed > 0.5 ? -CAR.brake : -CAR.accel * 0.6) * dt;
-  } else {
-    car.speed -= Math.sign(car.speed) * 9 * dt;
-    if (Math.abs(car.speed) < 0.3) car.speed = 0;
+  exit(player) {
+    const car = player.car;
+    if (!car) return;
+    player.car = null;
+    player.onFoot = true;
+    player.pos.x = car.x + Math.sin(car.angle) * 3;
+    player.pos.z = car.z + Math.cos(car.angle) * 3;
+    car.speed = 0;
+    this.G.audio.engine(false);
   }
-  if (handbrake) car.speed -= Math.sign(car.speed) * 16 * dt;
-  car.speed = Math.max(-CAR.reverseSpeed, Math.min(CAR.maxSpeed, car.speed));
-  const turn = steer * CAR.steer * dt * Math.min(1, Math.abs(car.speed) / 8) * Math.sign(car.speed || 1);
-  car.heading += turn * (handbrake ? 1.5 : 1);
-  const nx = car.x + Math.sin(car.heading) * car.speed * dt;
-  const nz = car.z + Math.cos(car.heading) * car.speed * dt;
-  const fixed = collide(nx, nz, 2.1);
-  // A wall hit kills most of the speed.
-  if (Math.abs(fixed.x - nx) > 0.01 || Math.abs(fixed.z - nz) > 0.01) car.speed *= 0.4;
-  car.x = fixed.x; car.z = fixed.z;
-  // Clamp to the city edge.
-  car.x = Math.max(-276, Math.min(276, car.x));
-  car.z = Math.max(-276, Math.min(276, car.z));
-}
-
-/** Sync a mesh to a car state (heading 0 = facing +z). */
-export function syncCarMesh(mesh, car) {
-  mesh.position.set(car.x, 0, car.z);
-  mesh.rotation.y = car.heading;
+  topSpeed(car) {
+    const base = car.sport ? 34 : 26;
+    return base * (1 + 0.25 * car.upgrades.engine);
+  }
+  update(dt, player, input) {
+    for (const car of this.cars) {
+      if (car.wreck) {
+        if (car.fire) {
+          car.fire.rotation.y += dt * 3;
+          car.fire.scale.y = 1 + Math.sin(performance.now() * 0.01) * 0.15;
+        }
+        continue;
+      }
+      if (player.car === car) {
+        const fwd = input.down('KeyW') || input.down('ArrowUp') ? 1 : input.down('KeyS') || input.down('ArrowDown') ? -0.6 : 0;
+        const steer = (input.down('KeyA') || input.down('ArrowLeft') ? 1 : 0) - (input.down('KeyD') || input.down('ArrowRight') ? 1 : 0);
+        const nitro = input.down('ShiftLeft') && car.upgrades.nitro > 0;
+        const accel = nitro ? 26 : 15;
+        car.speed += fwd * accel * dt;
+        car.speed *= Math.pow(0.4, dt); // drag
+        car.speed = Math.max(-10, Math.min(this.topSpeed(car) * (nitro ? 1.45 : 1), car.speed));
+        if (Math.abs(car.speed) > 0.5) car.angle += steer * 1.9 * dt * Math.sign(car.speed);
+        const nx = car.x - Math.sin(car.angle) * car.speed * dt;
+        const nz = car.z - Math.cos(car.angle) * car.speed * dt;
+        const hit = this.G.city.collide(nx, nz, 1.6);
+        if (Math.abs(hit.x - nx) > 0.01 || Math.abs(hit.z - nz) > 0.01) {
+          car.speed *= 0.4;
+          this._damage(car, 2 * dt * Math.abs(car.speed));
+        }
+        car.x = hit.x; car.z = hit.z;
+        car.mesh.position.set(car.x, 0, car.z);
+        car.mesh.rotation.y = car.angle;
+        for (const w of car.wheels) w.rotation.x += car.speed * dt * 2;
+        player.pos.x = car.x; player.pos.z = car.z;
+        player.angle = car.angle;
+        this.G.audio.engine(true, Math.abs(car.speed));
+        if (nitro) this.G.hud.flash('NITRO!', 0.4);
+      }
+    }
+  }
+  _damage(car, amount) {
+    if (car.wreck) return;
+    car.hp -= amount;
+    if (car.hp <= 0) this.explode(car);
+  }
+  damageCar(car, amount) { this._damage(car, amount); }
+  explode(car) {
+    car.wreck = true;
+    car.hp = 0;
+    car.speed = 0;
+    // Fire cone + smoke column on the wreck.
+    const fire = new THREE.Group();
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(1.4, 3.4, 8), new THREE.MeshBasicMaterial({ color: 0xff7722, transparent: true, opacity: 0.9 }));
+    flame.position.y = 1.8; fire.add(flame);
+    const smoke = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.6, 5, 8), new THREE.MeshLambertMaterial({ color: 0x333333, transparent: true, opacity: 0.65 }));
+    smoke.position.y = 4.4; fire.add(smoke);
+    fire.position.set(car.x, 0, car.z);
+    this.scene.add(fire);
+    car.fire = fire;
+    // Char the body.
+    car.mesh.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshLambertMaterial({ color: 0x1a1a1a }); });
+    this.G.audio.explosion();
+    if (this.G.player && this.G.player.car === car) {
+      this.G.player.car = null;
+      this.G.player.onFoot = true;
+      this.G.player.hp -= 25;
+      this.G.audio.engine(false);
+    }
+    this.G.hud.flash('Car exploded — burning wreck!');
+  }
+  applyUpgrade(car, id) {
+    if (id === 'engine') car.upgrades.engine += 1;
+    if (id === 'armor') { car.upgrades.armor += 1; car.maxHp += 60; car.hp = Math.min(car.maxHp, car.hp + 60); }
+    if (id === 'nitro') car.upgrades.nitro += 1;
+  }
 }

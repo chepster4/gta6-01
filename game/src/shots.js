@@ -1,98 +1,84 @@
-// The screenshot scenes behind ?shot=chase|walk|mission|night. Each one stages
-// the real game — a real car, real police, real thugs, a real job banner —
-// at a fixed spot, with a fixed clock and wanted level, then snaps the camera
-// straight to its framing so the picture never depends on how many frames
-// SwiftShader managed to run.
-import { syncCarMesh } from './vehicles.js';
-export function stageShot(name, G) {
-  const { world, missions, police, hud, sky, city } = G;
-  const player = world.player;
-  const setClock = (minutes) => {
-    G.clockMinutes = minutes;
-    sky.setTime(minutes);
+// Screenshot staging: ?shot=heli | roadblock | race | wheel | night |
+// start | play. Each shot stages the world so ONE frame shows the new
+// feature clearly (heli + searchlight, roadblock, race checkpoints,
+// weapon wheel). Sets window.__shotReady when the frame is settled.
+const THREE = window.THREE;
+
+export function applyShot(G, shot) {
+  const p = G.player;
+  const place = (x, z, angle) => {
+    p.pos.x = x; p.pos.z = z; p.angle = angle;
+    if (p.car) { G.vehicles.exit(p); }
+    G.render.shotMode = true;
+    G.city.showAllPalms();
   };
-
-  // Reset the shared bits every shot starts from.
-  player.dead = false;
-  player.hp = 100;
-  player.money = 120;
-  player.coins = 0;
-  player.hasPistol = true;
-  player.ammo = 60;
-  world.setInCar(null);
-  hud.setMoney(120);
-  hud.setCoins(0);
-  hud.setHp(100);
-
-  if (name === 'walk') {
-    // On foot by the plaza fountain, a red coupe beside the player, job 1 live.
-    missions.jumpTo(0);
-    setClock(9 * 60 + 30);
-    police.setWanted(0);
-    player.x = -6; player.z = 8; player.heading = 0.4;
-    const car = world.streetCars[1]; // Sunset Coupe
-    car.state.x = 2; car.state.z = 20; car.state.heading = 1.2;
-    syncCarMesh(car.mesh, car.state);
-    city.hidePalmsNear(player.x, player.z, 30);
-    world.syncPlayerMesh();
-    return { cam: [-10, 5.2, -6, 4, 1.6, 24] };
+  const settle = () => {
+    // Keep the centre of the frame clear: no mission banner, no flash.
+    G.hud.bannerEl.style.display = 'none';
+    G.hud._bannerTimer = 0;
+    G.hud.flashEl.textContent = '';
+    G.hud._flashTimer = 0;
+    setTimeout(() => { window.__shotReady = true; }, 1200);
+    G.render.shotMode = true;
+  };
+  const override = (px, py, pz, lx, ly, lz) => {
+    G.render.shotOverride = { pos: new THREE.Vector3(px, py, pz), look: new THREE.Vector3(lx, ly, lz) };
+  };
+  if (shot === 'heli') {
+    G.sky.setMode('night'); G.render.applyMode('night');
+    p.wanted = 4;
+    place(0, -40, Math.PI * 0.15);
+    G.police.update(0.5, p);
+    // Park the heli low and close so it fills the upper frame, then
+    // point the camera up at it.
+    G.police.heliPos.x = 2; G.police.heliPos.z = -40; G.police.heliPos.y = 34;
+    G.police.heli.position.set(2, 34, -40);
+    override(-2, 6, -12, 2, 32, -40);
+    G.city.hidePalmsNear(p.pos.x, p.pos.z, 30);
+    settle();
+  } else if (shot === 'roadblock') {
+    G.sky.setMode('dusk'); G.render.applyMode('dusk');
+    p.wanted = 3;
+    place(0, 60, Math.PI);
+    G.police.update(0.5, p);
+    // Roadblock spawns 24 m ahead of the player (z = 84): frame it
+    // head-on from just behind the player.
+    override(3, 6, 52, 0, 2, 84);
+    G.city.hidePalmsNear(p.pos.x, p.pos.z, 30);
+    settle();
+  } else if (shot === 'race') {
+    G.sky.setMode('day'); G.render.applyMode('day');
+    p.wanted = 0;
+    const car = G.vehicles.cars[0];
+    car.x = 0; car.z = -200; car.angle = Math.PI / 2; car.mesh.position.set(0, 0, -200); car.mesh.rotation.y = car.angle;
+    G.vehicles.enter(car, p);
+    G.missions._startRace(1);
+    override(14, 11, -166, 0, 2, -200);
+    settle();
+  } else if (shot === 'wheel') {
+    G.sky.setMode('dusk'); G.render.applyMode('dusk');
+    p.wanted = 2;
+    p.weapons = { pistol: true, smg: true, shotgun: true, rifle: true };
+    p.ammo = { pistol: 60, smg: 120, shotgun: 24, rifle: 40 };
+    place(120, -20, Math.PI * 0.9);
+    G._wheelStaged = true;
+    G.hud.showWheel(true);
+    override(108, 10, 2, 120, 2, -20);
+    settle();
+  } else if (shot === 'night') {
+    G.sky.setMode('night'); G.render.applyMode('night');
+    p.wanted = 2;
+    place(28, 60, Math.PI * 0.8);
+    G.city.hidePalmsNear(p.pos.x, p.pos.z, 30);
+    settle();
+  } else if (shot === 'start') {
+    // Leave the start screen up; the game world idles behind it.
+    window.__shotReady = true;
+  } else {
+    // play: default dusk gameplay at the plaza.
+    G.sky.setMode('dusk'); G.render.applyMode('dusk');
+    place(28, 60, Math.PI * 0.8);
+    settle();
   }
-
-  if (name === 'mission') {
-    // On foot in the container yard at dusk, three Viper thugs closing in.
-    missions.jumpTo(3);
-    setClock(18 * 60 + 40);
-    police.setWanted(2);
-    player.x = 170; player.z = 100; player.heading = 0.9;
-    world.spawnThugs();
-    const spots = [[186, 96], [192, 102], [186, 108]];
-    world.thugs.forEach((thug, i) => {
-      thug.dead = false;
-      thug.hp = 60;
-      thug.mesh.visible = true;
-      thug.x = spots[i][0];
-      thug.z = spots[i][1];
-      thug.mesh.position.set(thug.x, 0, thug.z);
-    });
-    city.showAllPalms();
-    world.syncPlayerMesh();
-    // Camera on the clear east-west road (z=70), looking into the yard —
-    // never inside a block, where a building would swallow the frame.
-    return { cam: [160, 9, 70, 192, 2, 102] };
-  }
-
-  if (name === 'night') {
-    // Driving the City Taxi down the neon avenue at night, job 5 live.
-    // The x=0 avenue at z=120 is clear of palms; the tower glows ahead.
-    missions.jumpTo(4);
-    setClock(21 * 60);
-    police.setWanted(3);
-    const taxi = world.streetCars[2]; // City Taxi
-    taxi.state.x = 0; taxi.state.z = 120; taxi.state.heading = 0;
-    taxi.state.speed = 20;
-    syncCarMesh(taxi.mesh, taxi.state);
-    world.setInCar(taxi);
-    police.stageCruisers([{ x: -5, z: 134, heading: Math.PI, speed: 20 }]);
-    city.showAllPalms();
-    world.syncPlayerMesh();
-    return { cam: [0, 5, 96, 0, 1.5, 160] };
-  }
-
-  // Default: 'chase' — the cover. Job 3, wanted 3, tearing down the avenue
-  // in the Dune Buggy with two cruisers cutting the player off ahead.
-  missions.jumpTo(2);
-  setClock(10 * 60);
-  police.setWanted(3);
-  const buggy = world.streetCars[0]; // Dune Buggy
-  buggy.state.x = 3; buggy.state.z = 120; buggy.state.heading = 0;
-  buggy.state.speed = 22;
-  syncCarMesh(buggy.mesh, buggy.state);
-  world.setInCar(buggy);
-  police.stageCruisers([
-    { x: 6, z: 152, heading: Math.PI, speed: 24 },
-    { x: -2, z: 170, heading: Math.PI, speed: 22 },
-  ]);
-  city.hidePalmsNear(3, 120, 34);
-  world.syncPlayerMesh();
-  return { cam: [3, 6, 96, 3, 1.2, 160] };
+  if (shot && shot !== 'start') G.hud.hideStart();
 }
