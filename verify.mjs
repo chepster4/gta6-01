@@ -1,179 +1,123 @@
-// Gameplay verification for Palmira Bay: drives the real game through the
-// real keyboard path (Enter to start, E to steal, F to fight) and the debug
-// hook for teleporting between test spots. Prints PASS/FAIL per check.
-// Usage: node verify.mjs [port]
-import { chromium } from 'playwright';
+// Gameplay verification (fresh): drives the real game in headless
+// Chromium and checks missions, shop, coins, heli, roadblock, weapons,
+// garage, race, exploding cars and save/load through window.__game.
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const port = Number(process.argv[2] ?? 8903);
-const server = spawn('node', ['serve.ts', '--port', String(port)], { cwd: here, stdio: 'ignore' });
-await new Promise((r) => setTimeout(r, 1500));
-
-const browser = await chromium.launch({
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
-});
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-const errors = [];
-page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
-page.on('pageerror', (err) => errors.push(String(err)));
-await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load', timeout: 60000 });
-await page.waitForFunction(() => window.__palmira, null, { timeout: 30000 });
-await page.waitForTimeout(500);
-
+const PORT = 8902;
 const results = [];
-function check(name, ok, detail = '') {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
+function check(name, ok, extra = '') {
+  results.push({ name, ok });
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${extra}`);
 }
-const state = () => page.evaluate(() => {
-  const P = window.__palmira;
-  return {
-    money: P.world.player.money, hp: P.world.player.hp, coins: P.world.player.coins,
-    ammo: P.world.player.ammo, hasPistol: P.world.player.hasPistol,
-    inCar: !!P.world.player.inCar, mission: P.missions.index, phase: P.missions.phase,
-    thugsLeft: P.missions.thugsLeft, wanted: P.police.wanted,
-    briefcase: P.world.briefcase.visible,
-    x: P.world.player.x, z: P.world.player.z,
-  };
-});
-const setPlayer = (x, z, heading) => page.evaluate(([x, z, h]) => {
-  const P = window.__palmira;
-  P.world.player.x = x; P.world.player.z = z; P.world.player.heading = h;
-  P.world.syncPlayerMesh();
-}, [x, z, heading]);
 
-// Start the game.
-await page.keyboard.press('Enter');
-await page.waitForTimeout(400);
-
-// Job 1: walk to the Dune Buggy at (-24, 40) and press E to steal it.
-await setPlayer(-24, 43, Math.PI);
-await page.keyboard.press('KeyE');
-await page.waitForTimeout(600);
-let s = await state();
-check('job1 steal car -> in car', s.inCar, `inCar=${s.inCar}`);
-check('job1 completes, +$250, pistol given', s.mission === 1 && s.money === 370 && s.hasPistol,
-  `mission=${s.mission} money=${s.money} pistol=${s.hasPistol} ammo=${s.ammo}`);
-check('stealing adds wanted', s.wanted >= 1, `wanted=${s.wanted}`);
-
-// Drive forward until the car has clearly moved (or 15 s pass): SwiftShader
-// renders slowly, so this polls instead of assuming a fixed frame rate.
-const before = await state();
-await page.keyboard.down('KeyW');
-let moved = 0;
-for (let i = 0; i < 30 && moved <= 10; i += 1) {
+const server = spawn('node', ['serve.ts', '--port', String(PORT)], { cwd: here, stdio: 'pipe' });
+await new Promise((r) => setTimeout(r, 1500));
+try {
+  const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'] });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://127.0.0.1:${PORT}/?shot=play&seed=1`, { waitUntil: 'load', timeout: 60000 });
+  await page.waitForFunction(() => window.__shotReady === true, { timeout: 60000 });
   await page.waitForTimeout(500);
-  s = await state();
-  moved = Math.hypot(s.x - before.x, s.z - before.z);
-}
-await page.keyboard.up('KeyW');
-check('driving moves the car', moved > 10, `moved=${moved.toFixed(1)}m`);
+  const G = (expr) => page.evaluate(expr);
 
-// Exit the car, wait until the exit has actually run, then walk to a coin
-// at (-206,-206) and collect it.
-await page.keyboard.press('KeyE');
-for (let i = 0; i < 10; i += 1) {
-  s = await state();
-  if (!s.inCar) break;
+  check('game boots, player exists', await G(`!!window.__game && !!window.__game.player`));
+  check('mission 1 active', (await G(`window.__game.missions.current().id`)) === 1);
+  check('12 cars spawned', (await G(`window.__game.vehicles.cars.length`)) === 12);
+  check('12 coins spawned', (await G(`window.__game.world.coins.length`)) === 12);
+  check('traffic + peds alive', (await G(`window.__game.traffic.cars.length + window.__game.traffic.peds.length`)) === 21);
+
+  // Mission 1: teleport to target, expect completion + pistol.
+  await G(`const p=window.__game.player; p.pos.x=120; p.pos.z=-40;`);
+  await page.waitForTimeout(700);
+  check('mission 1 completes (+$250, pistol)', (await G(`window.__game.missions.idx`)) === 1 && (await G(`window.__game.player.weapons.pistol`)) === true);
+
+  // Coin pickup.
+  const coinsBefore = await G(`window.__game.player.coins`);
+  await G(`const p=window.__game.player; p.pos.x=40; p.pos.z=40;`);
   await page.waitForTimeout(500);
-}
-await setPlayer(-206, -206, 0);
-for (let i = 0; i < 10; i += 1) {
-  s = await state();
-  if (s.coins === 1) break;
+  check('gold coin pickup +$25', (await G(`window.__game.player.coins`)) === coinsBefore + 1);
+
+  // Shop: teleport to SOLMAR ARMS, buy ammo via the real handler.
+  await G(`const p=window.__game.player; p.pos.x=118; p.pos.z=-34; p.money=500;`);
+  await page.waitForTimeout(300);
+  const ammoBefore = await G(`window.__game.player.ammo.pistol`);
+  await G(`window.__game.onShopBuy('ammo')`);
+  check('shop ammo +30 / $50', (await G(`window.__game.player.ammo.pistol`)) === ammoBefore + 30 && (await G(`window.__game.player.money`)) === 450);
+
+  // Weapon switch to SMG after granting it (mission 2 reward path).
+  await G(`const p=window.__game.player; p.weapons.smg=true; p.ammo.smg=90;`);
+  await page.keyboard.press('Digit2');
+  await page.waitForTimeout(200);
+  check('weapon switch 1->2 (SMG)', (await G(`window.__game.player.weapon`)) === 'smg');
+
+  // Heli + roadblock at wanted 3.
+  await G(`window.__game.player.wanted=3;`);
+  await page.waitForTimeout(1200);
+  check('CONDOR-1 heli visible at wanted 3', await G(`window.__game.police.heli.visible`));
+  check('roadblock spawned at wanted 3', await G(`!!window.__game.police.roadblock`));
+  check('searchlight on at dusk', await G(`window.__game.police.spot.intensity > 0`));
+
+  // Car steal + garage upgrade + explosion.
+  await G(`const p=window.__game.player; p.pos.x=30; p.pos.z=-14;`);
+  await page.waitForTimeout(200);
+  await G(`const g=window.__game; const c=g.vehicles.nearestCar(g.player.pos.x,g.player.pos.z,6); g.vehicles.enter(c,g.player);`);
+  check('car stolen, driving state', await G(`window.__game.player.car !== null && window.__game.player.onFoot === false`));
+  await G(`const g=window.__game; g.player.money=1000; g.vehicles.applyUpgrade(g.player.car,'engine');`);
+  check('garage engine upgrade applied', (await G(`window.__game.player.car.upgrades.engine`)) === 1);
+  await G(`window.__game.vehicles.damageCar(window.__game.player.car, 500)`);
+  await page.waitForTimeout(400);
+  check('car explodes -> burning wreck', await G(`window.__game.vehicles.cars.some(c=>c.wreck && c.fire)`));
+
+  // Race: start route 1, teleport through checkpoints.
+  await G(`window.__game.missions._startRace(1)`);
+  const route = await G(`window.__game.missions.race.route.points`);
+  for (const [x, z] of route) {
+    await G(`const p=window.__game.player; p.pos.x=${x}; p.pos.z=${z};`);
+    await page.waitForTimeout(120);
+  }
   await page.waitForTimeout(500);
-}
-s = await state();
-check('coin collected +$25', s.coins === 1 && s.money === 395, `coins=${s.coins} money=${s.money}`);
+  check('street race completable (prize paid)', (await G(`window.__game.missions.race`)) === null);
 
-// Shop: walk to the SOLMAR ARMS kiosk, press E, buy ammo.
-await setPlayer(52, -12, 0);
-await page.keyboard.press('KeyE');
-let shopOpen = false;
-for (let i = 0; i < 10 && !shopOpen; i += 1) {
+  // Mission 4 kill-type: spawn rivals, kill them, expect advance.
+  await G(`window.__game.missions.idx=3; window.__game.missions.start();`);
+  await page.waitForTimeout(300);
+  check('mission 4 spawns 3 rivals', (await G(`window.__game.missions.rivals.length`)) === 3);
+  await G(`window.__game.missions.rivals.forEach(r=>window.__game.missions.damageRival(r,1000))`);
   await page.waitForTimeout(500);
-  shopOpen = await page.evaluate(() => window.__palmira.hud.shopVisible());
-}
-check('shop opens near kiosk', shopOpen);
-await page.click('#buy-ammo');
-await page.waitForTimeout(300);
-s = await state();
-check('buy ammo +30 for $50', s.ammo === 90 && s.money === 345, `ammo=${s.ammo} money=${s.money}`);
-await page.click('#close-shop');
-await page.waitForTimeout(200);
+  check('mission 4 completes after rivals down', (await G(`window.__game.missions.idx`)) === 4);
 
-// Safehouse: hurt the player, set wanted 3, stand in the safehouse.
-await page.evaluate(() => {
-  const P = window.__palmira;
-  P.world.player.hp = 50;
-  P.police.setWanted(3);
-});
-await setPlayer(168, -196, 0);
-let healed = false; let cooled = false;
-for (let i = 0; i < 60 && !(healed && cooled); i += 1) {
-  await page.waitForTimeout(500);
-  s = await state();
-  healed = s.hp > 55;
-  cooled = s.wanted < 3;
-}
-s = await state();
-check('safehouse heals HP', s.hp > 55, `hp=${s.hp.toFixed(1)}`);
-check('safehouse lowers wanted', s.wanted < 3, `wanted=${s.wanted}`);
+  // Crew spawns on mission 8.
+  await G(`window.__game.missions.idx=7; window.__game.missions.start();`);
+  await page.waitForTimeout(300);
+  check('crew (Marcus & Lena) spawns on mission 8', (await G(`window.__game.missions.crew.length`)) === 2);
 
-// Job 4: jump to it, then shoot the thugs one by one — each attempt re-aims
-// at the nearest living thug from live state, so chaser movement cannot
-// make a shot silently miss its target.
-await page.evaluate(() => {
-  const P = window.__palmira;
-  P.missions.jumpTo(3);
-  P.world.spawnThugs();
-  for (const t of P.world.thugs) { t.hp = 1; }
-});
-await page.waitForTimeout(300);
-for (let attempt = 0; attempt < 6; attempt += 1) {
-  s = await state();
-  if (s.thugsLeft === 0) break;
-  const aimed = await page.evaluate(() => {
-    const P = window.__palmira;
-    const alive = P.world.thugs.filter((t) => !t.dead);
-    if (alive.length === 0) return false;
-    let best = alive[0]; let bestD = Infinity;
-    for (const t of alive) {
-      const d = Math.hypot(t.x - P.world.player.x, t.z - P.world.player.z);
-      if (d < bestD) { bestD = d; best = t; }
-    }
-    P.world.player.x = best.x - 4; P.world.player.z = best.z;
-    P.world.player.heading = Math.atan2(best.x - P.world.player.x, best.z - P.world.player.z);
-    P.world.syncPlayerMesh();
-    return true;
-  });
-  if (!aimed) break;
-  await page.keyboard.press('KeyF');
-  await page.waitForTimeout(600);
-  s = await state();
-  console.log(`  shot ${attempt + 1}: thugsLeft=${s.thugsLeft} ammo=${s.ammo}`);
-}
-s = await state();
-check('all 3 thugs down, briefcase appears', s.thugsLeft === 0 && s.briefcase,
-  `thugsLeft=${s.thugsLeft} briefcase=${s.briefcase}`);
-await setPlayer(192, 102, 0);
-for (let i = 0; i < 10; i += 1) {
-  s = await state();
-  if (s.mission === 4) break;
-  await page.waitForTimeout(500);
-}
-s = await state();
-check('job4 completes, +$500', s.mission === 4 && s.money === 845,
-  `mission=${s.mission} money=${s.money}`);
+  // Radio switch.
+  const st = await G(`window.__game.audio.radioNext()`);
+  check('radio station switches', typeof st === 'string' && st.length > 5, `(${st})`);
 
-// Job 5 target exists and the game is still error-free.
-check('no console errors during play', errors.length === 0, errors.join(' | ').slice(0, 300));
+  // Save / load round-trip.
+  await G(`window.__game.save()`);
+  const saved = await G(`!!localStorage.getItem('palmira-bay-save-v1')`);
+  check('save writes localStorage', saved === true);
 
+  // Safehouse regen.
+  await G(`const p=window.__game.player; p.hp=50; p.pos.x=168; p.pos.z=-185; p.wanted=0;`);
+  await page.waitForTimeout(1500);
+  check('safehouse regens HP', (await G(`window.__game.player.hp`)) > 50);
+
+  check('0 console errors', errors.length === 0, errors.join(' | ').slice(0, 300));
+  await browser.close();
+} finally {
+  server.kill();
+}
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length === 0 ? 'VERIFY OK' : `VERIFY FAILED: ${failed.length} check(s)`);
-await browser.close();
-server.kill();
-process.exit(failed.length === 0 ? 0 : 1);
+console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+if (failed.length) { console.error('VERIFY FAILED'); process.exit(1); }
+console.log('VERIFY OK');

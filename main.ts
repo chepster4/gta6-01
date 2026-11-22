@@ -1,14 +1,10 @@
-// Palmira Bay (gta6-01): hands in the game this directory built. The game is
-// this directory's game/ folder — plain static files a desktop browser loads
-// offline (game/index.html and its ES modules, three.js vendored under
-// game/vendor) — and this program copies game/ and screenshots/ from beside
-// this file to /output and writes /output/dossier.json with the vendored
-// make.fun library.
+// PALMIRA BAY — Streets of the Sun (gta6-01, Node 22, stdlib only).
+// Hands the entry in: copies game/ and screenshots/ beside this file
+// into /output (or $MAKEFUN_OUTPUT_DIR) and writes dossier.json with
+// the vendored make.fun library.
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
+// Play it locally first: `node serve.ts`, then http://localhost:8080.
+// Build the hand-in bundle: `mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts`
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,23 +13,17 @@ import { buildDossier } from './vendor/makefun-game.ts';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-// The entry only makes sense with a playable game and its screenshots beside it.
-if (!existsSync(join(here, 'game', 'index.html'))) {
-  throw new Error('game/index.html is missing — nothing to hand in');
-}
-if (!existsSync(join(here, 'screenshots'))) {
-  throw new Error('screenshots/ is missing — the dossier needs 3 or 4 shots');
-}
-
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the
-// bytes; the others refuse an entry the scorer would refuse (more than 4
-// screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of
-// game files, in all, or a path under game/ over 1000 bytes).
+// Scorer caps (reference/gate.json): text_max_bytes shapes the dossier
+// bytes; the rest refuse an entry the scorer would refuse — more than
+// 4 screenshots, one over 256 KiB, more than 993 files / 48 MiB in
+// game/, or a game/ path over 1000 bytes.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {
@@ -44,5 +34,4 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
-
-console.log(`Palmira Bay handed in to ${out} (game/ + screenshots/ + dossier.json)`);
+console.log(`dossier written to ${join(out, 'dossier.json')}`);
