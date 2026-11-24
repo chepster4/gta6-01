@@ -1,19 +1,168 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PALMIRA BAY — Streets of the Sun</title>
+<title>SOLMARA — Streets of the Neon Tide</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0c0c14; }
-  #game { position: fixed; inset: 0; }
-  #game canvas { display: block; }
-  button { cursor: pointer; font-family: Arial, sans-serif; }
+  :root { --acc:#ffb020; --cyan:#19e3ff; --panel:rgba(8,12,20,.78); --line:rgba(255,255,255,.14); }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; overflow:hidden; background:#0b0e16; font-family:"Segoe UI",system-ui,Arial,sans-serif; color:#f2f5ff; }
+  #game { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .hidden { display:none !important; }
+  /* ---------- HUD ---------- */
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:5; }
+  #topleft { position:absolute; top:14px; left:16px; display:flex; flex-direction:column; gap:6px; }
+  .chip { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:7px 12px; font-weight:700; letter-spacing:.4px; width:max-content; backdrop-filter:blur(3px); }
+  #stars { color:#ffd23e; font-size:22px; letter-spacing:3px; text-shadow:0 0 12px rgba(255,210,62,.7); }
+  #stars.zero { color:#5b6478; text-shadow:none; }
+  #cash { color:#7dff9b; font-size:17px; }
+  #respect { color:var(--cyan); font-size:14px; }
+  #healthwrap { position:absolute; top:14px; right:16px; text-align:right; display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
+  #healthbar { width:220px; height:14px; background:rgba(0,0,0,.55); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  #healthfill { height:100%; width:100%; background:linear-gradient(90deg,#37e08b,#a5ff6b); transition:width .2s; }
+  #ammo { font-size:15px; }
+  #weapon { color:var(--acc); font-size:14px; }
+  #mission { position:absolute; top:14px; left:50%; transform:translateX(-50%); text-align:center; max-width:520px; }
+  #missionTitle { font-size:19px; font-weight:800; color:var(--acc); text-shadow:0 2px 10px rgba(0,0,0,.8); letter-spacing:.5px; }
+  #missionObj { font-size:14px; margin-top:3px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 12px; display:inline-block; }
+  #missionDist { font-size:12px; color:var(--cyan); margin-top:3px; }
+  #banner { position:absolute; top:32%; left:50%; transform:translate(-50%,-50%); text-align:center; width:90%; }
+  #bannerTitle { font-size:44px; font-weight:900; color:#fff; text-shadow:0 0 24px rgba(255,176,32,.8), 0 3px 8px rgba(0,0,0,.9); letter-spacing:1px; }
+  #bannerSub { font-size:18px; margin-top:8px; color:#ffe9b0; text-shadow:0 2px 6px rgba(0,0,0,.9); }
+  #toast { position:absolute; bottom:190px; left:50%; transform:translateX(-50%); font-size:15px; background:var(--panel); border:1px solid var(--line); padding:8px 16px; border-radius:9px; }
+  #minimapWrap { position:absolute; left:16px; bottom:16px; border:2px solid rgba(255,255,255,.35); border-radius:50%; overflow:hidden; box-shadow:0 0 0 4px rgba(0,0,0,.45), 0 4px 18px rgba(0,0,0,.6); }
+  #minimap { display:block; border-radius:50%; }
+  #speedo { position:absolute; right:18px; bottom:16px; text-align:right; }
+  #speed { font-size:40px; font-weight:900; text-shadow:0 2px 8px rgba(0,0,0,.9); }
+  #speedUnit { font-size:13px; color:#cfd6e4; }
+  #radio { position:absolute; right:18px; bottom:96px; font-size:13px; color:#ffd9ec; background:var(--panel); border:1px solid var(--line); padding:6px 10px; border-radius:8px; }
+  #controls { position:absolute; right:18px; bottom:140px; font-size:11.5px; color:#aab4c8; text-align:right; line-height:1.55; }
+  #racetimer { position:absolute; top:104px; left:50%; transform:translateX(-50%); font-size:26px; font-weight:900; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.9); }
+  #racepos { position:absolute; top:140px; left:50%; transform:translateX(-50%); font-size:15px; color:var(--cyan); text-shadow:0 2px 6px rgba(0,0,0,.9); }
+  /* ---------- weapon wheel ---------- */
+  #wheel { position:fixed; inset:0; z-index:8; display:flex; align-items:center; justify-content:center; pointer-events:none; background:rgba(0,0,0,.35); }
+  #wheelBox { position:relative; width:340px; height:340px; }
+  .wheelSlot { position:absolute; width:130px; height:86px; background:var(--panel); border:2px solid var(--line); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+  .wheelSlot.sel { border-color:var(--acc); box-shadow:0 0 18px rgba(255,176,32,.7); }
+  .wheelSlot .wn { font-size:15px; font-weight:800; }
+  .wheelSlot .wd { font-size:11px; color:#9fb0c8; }
+  .wheelSlot .wa { font-size:12px; color:#7dff9b; }
+  .wheelSlot.locked { opacity:.38; }
+  /* ---------- menus / panels ---------- */
+  .screen { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg, rgba(10,8,24,.88), rgba(20,10,40,.82)); }
+  .panel { background:rgba(10,14,24,.92); border:1px solid rgba(255,176,32,.45); border-radius:16px; padding:30px 36px; max-width:640px; width:92%; box-shadow:0 20px 60px rgba(0,0,0,.7); }
+  .panel h1 { font-size:44px; letter-spacing:2px; color:var(--acc); text-shadow:0 0 26px rgba(255,176,32,.55); }
+  .panel h1 span { color:var(--cyan); }
+  .panel h2 { font-size:24px; color:var(--acc); margin-bottom:10px; }
+  .panel p { font-size:15px; line-height:1.6; color:#dfe6f5; margin:8px 0; }
+  .panel .sub { color:#9fb0c8; font-size:13.5px; }
+  .btn { pointer-events:auto; cursor:pointer; display:inline-block; margin-top:14px; margin-right:10px; padding:12px 26px; border-radius:10px; border:none; font-size:16px; font-weight:800; letter-spacing:.5px; color:#14100a; background:linear-gradient(180deg,#ffc44d,#ff9d00); box-shadow:0 4px 18px rgba(255,157,0,.45); }
+  .btn.ghost { background:transparent; color:#dfe6f5; border:1px solid var(--line); box-shadow:none; }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .keys { display:grid; grid-template-columns:auto 1fr; gap:3px 14px; font-size:13.5px; margin-top:10px; }
+  .keys b { color:var(--acc); }
+  .shopRow { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 4px; border-bottom:1px solid var(--line); font-size:15px; }
+  .shopRow small { color:#9fb0c8; display:block; font-size:12.5px; }
+  .shopRow .buy { pointer-events:auto; cursor:pointer; padding:7px 14px; border-radius:8px; border:none; font-weight:800; background:var(--acc); color:#14100a; }
+  .shopRow .buy:disabled { opacity:.4; }
+  #saveSlots { display:flex; gap:10px; margin-top:10px; }
+  .slotBtn { pointer-events:auto; cursor:pointer; flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.05); color:#fff; font-size:14px; }
+  #status { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 </style>
 </head>
 <body>
-<div id="game"></div>
-<script src="vendor/three.min.js"></script>
-<script type="module" src="src/main.js"></script>
+<canvas id="game" aria-label="SOLMARA: open-world crime game. Drive, fight, complete 12 story missions."></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+
+<div id="hud" class="hidden">
+  <div id="topleft">
+    <div class="chip" id="stars">☆☆☆☆☆</div>
+    <div class="chip" id="cash">$250</div>
+    <div class="chip" id="respect">RESPECT 0 · ROOKIE</div>
+  </div>
+  <div id="healthwrap">
+    <div id="healthbar"><div id="healthfill"></div></div>
+    <div class="chip" id="ammo">PISTOL · ∞</div>
+    <div class="chip" id="weapon">PISTOL</div>
+  </div>
+  <div id="mission">
+    <div id="missionTitle"></div>
+    <div id="missionObj" class="hidden"></div>
+    <div id="missionDist"></div>
+  </div>
+  <div id="racetimer" class="hidden">0:00.0</div>
+  <div id="racepos" class="hidden"></div>
+  <div id="banner" class="hidden"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
+  <div id="toast" class="hidden"></div>
+  <div id="minimapWrap"><canvas id="minimap" width="190" height="190"></canvas></div>
+  <div id="speedo" class="hidden"><div id="speed">0</div><div id="speedUnit">MPH · <span id="gear">D</span></div></div>
+  <div id="radio">♪ SOLMARA FM</div>
+  <div id="controls">WASD move / drive · SHIFT run / nitro · E enter car · Q weapon wheel<br>1-4 weapons · CLICK shoot · R radio · G garage · P pause · M save</div>
+</div>
+
+<div id="wheel" class="hidden">
+  <div id="wheelBox">
+    <div class="wheelSlot" data-w="pistol" style="left:105px; top:0;"><div class="wn">🔫 PISTOL</div><div class="wd">Fast · close range</div><div class="wa">AMMO ∞</div></div>
+    <div class="wheelSlot" data-w="smg" style="right:0; top:127px;"><div class="wn">SMG</div><div class="wd">Rapid fire</div><div class="wa">AMMO 0</div></div>
+    <div class="wheelSlot" data-w="shotgun" style="left:105px; bottom:0;"><div class="wn">SHOTGUN</div><div class="wd">Heavy spread</div><div class="wa">AMMO 0</div></div>
+    <div class="wheelSlot" data-w="rifle" style="left:0; top:127px;"><div class="wn">RIFLE</div><div class="wd">Long range · deadly</div><div class="wa">AMMO 0</div></div>
+  </div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="panel">
+    <h1>SOLMARA <span>— Streets of the Neon Tide</span></h1>
+    <p>An original open-world crime game. You are <b>Dario “Dare” Solano</b>, a wheelman back on the island of Solmara. The Coral Kings run the districts — take them back, one job at a time, with your crew <b>Maya “Wrench” Okafor</b> and <b>Leo “Ghost” Ferreira</b>.</p>
+    <p class="sub">12 story missions · police dispatch, helicopter CONDOR-2 with searchlight &amp; roadblocks · 4 weapons on a weapon wheel · garage upgrades · 3 street races · radio · respect ranks · saves. Free to play, no account, no network.</p>
+    <div class="keys">
+      <b>W A S D</b><span>move on foot / drive</span>
+      <b>SHIFT</b><span>run / nitro boost</span>
+      <b>E</b><span>enter / exit car (steal parked &amp; traffic cars)</span>
+      <b>MOUSE + CLICK</b><span>aim &amp; shoot on foot</span>
+      <b>Q (hold) / 1–4</b><span>weapon wheel / quick weapon</span>
+      <b>R</b><span>switch radio station</span>
+      <b>G</b><span>garage &amp; shop (near your garage)</span>
+      <b>M</b><span>save game</span>
+      <b>P / ESC</b><span>pause</span>
+    </div>
+    <button class="btn" id="btnStart">▶ START STORY</button>
+    <button class="btn ghost" id="btnContinue">CONTINUE SAVE</button>
+    <p class="sub" id="menuNote">Best played in desktop Chrome, keyboard + mouse. Sound on for radio &amp; sirens.</p>
+  </div>
+</div>
+
+<div id="pauseMenu" class="screen hidden">
+  <div class="panel">
+    <h2>PAUSED — SOLMARA</h2>
+    <p id="pauseStats" class="sub"></p>
+    <button class="btn" id="btnResume">RESUME</button>
+    <button class="btn ghost" id="btnSave">SAVE GAME (M)</button>
+    <button class="btn ghost" id="btnQuit">QUIT TO TITLE</button>
+  </div>
+</div>
+
+<div id="garageMenu" class="screen hidden">
+  <div class="panel">
+    <h2>🛠 MAYA'S GARAGE — Solmara Customs</h2>
+    <p class="sub">Upgrades apply to the car you are driving. Cash: <b id="garageCash">$0</b></p>
+    <div id="garageList"></div>
+    <button class="btn" id="btnGarageClose">BACK TO THE STREETS</button>
+  </div>
+</div>
+
+<div id="shopMenu" class="screen hidden">
+  <div class="panel">
+    <h2>🔫 DOCKSIDE ARMS — Weapons &amp; Ammo</h2>
+    <p class="sub">Cash: <b id="shopCash">$0</b> · Pistol ammo is unlimited. Body armor refills your health.</p>
+    <div id="shopList"></div>
+    <button class="btn" id="btnShopClose">DONE</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
